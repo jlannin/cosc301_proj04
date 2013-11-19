@@ -225,8 +225,7 @@ void runserver(int numthreads, unsigned short serverport) {
 		queue_count++;
 		pthread_cond_signal(&work_cond);
 		pthread_mutex_unlock(&work_mutex);
-		senddata(new_sock, HTTP_404, sizeof(HTTP_404));
-		shutdown(new_sock, SHUT_RDWR);
+		senddata(new_sock, HTTP_200, sizeof(HTTP_404));
         }
 		printf("%d", queue_count);
     }
