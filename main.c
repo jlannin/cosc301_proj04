@@ -43,6 +43,15 @@ void usage(const char *progname) {
     exit(0);
 }
 
+int intsize (int x) {
+	int count = 1;
+	while (x > 9){
+		x = x / 10;
+		count++;
+	}
+	return count;
+}
+
 void *worker_function(void *arg) {
 	printf("%s\n", "Thread created");
 	int extractsock = 0;
@@ -59,8 +68,11 @@ void *worker_function(void *arg) {
 	{
 		pthread_mutex_lock(&work_mutex);
 		while(queue_count == 0){
-			printf("%s\n", "going to sleep");
+			//printf("%s\n", "going to sleep");
 			pthread_cond_wait(&work_cond, &work_mutex);
+		}
+		if(queue_count == -1){
+			break;
 		}
 		extractsock = tail->sock;
 		getip = tail->ip;
@@ -87,7 +99,7 @@ void *worker_function(void *arg) {
 
 		getreq = getrequest(extractsock, requestedfile, 1024);
 		if (!getreq) {
-			printf("%s", requestedfile);
+			//printf("%s\n", requestedfile);
 			if (requestedfile[0] == '/')
 			{
 				getstat = stat(&(requestedfile[1]), &checkfile);
@@ -95,16 +107,17 @@ void *worker_function(void *arg) {
 			else {
 				getstat = stat(requestedfile, &checkfile);
 			}
-			printf("%d", getstat);
+			//printf("%d", getstat);
 			if (!getstat) {			
 				filesize = checkfile.st_size;
-				int datasize = 63 + sizeof(filesize) +  filesize;
+				printf("%d\n", intsize(filesize));
+				int datasize = 63 + intsize(filesize) + filesize;
 				char data [datasize];
 				sprintf(data, HTTP_200, (int)checkfile.st_size);
 				int fd = open(requestedfile, O_RDONLY);
-				read(fd, data+(63+sizeof(filesize)), checkfile.st_size);
+				read(fd, data+(63 + intsize(filesize)), checkfile.st_size);
 				data[datasize] = '\0';
-				printf("%s", data);
+				//printf("%s", data);
 				senddata(extractsock, data, datasize);
 				shutdown(extractsock, SHUT_RDWR);
 				close(fd);
@@ -117,13 +130,13 @@ void *worker_function(void *arg) {
 			fail = 1;		
 		}
 		if(fail){
-			senddata(extractsock, HTTP_404, sizeof(HTTP_404));
+			senddata(extractsock, HTTP_404, strlen(HTTP_404));
 			shutdown(extractsock, SHUT_RDWR);
 		}	
 		pthread_mutex_lock(&log_mutex);	
 		FILE * log = fopen("weblog.txt", "a");
 		fwrite(ipadd, strlen(ipadd), 1, log);
-		char portstr[sizeof(portnum)];
+		char portstr[intsize(portnum)];
 		sprintf(portstr, ":%d ", portnum);
 		fwrite(portstr, strlen(portstr), 1, log);
 		time_t now = time(NULL);
@@ -173,8 +186,8 @@ void runserver(int numthreads, unsigned short serverport) {
 
     fprintf(stderr, "Server listening on port %d.  Going into request loop.\n", serverport);
     while (still_running) {
-	printf("%s", "loop");
-	fflush(stdout);
+	//printf("%s", "loop");
+	//fflush(stdout);
         struct pollfd pfd = {main_socket, POLLIN};
         int prv = poll(&pfd, 1, 10000);
 
@@ -221,14 +234,20 @@ void runserver(int numthreads, unsigned short serverport) {
 		queue_count++;
 		pthread_cond_signal(&work_cond);
 		pthread_mutex_unlock(&work_mutex);
-		senddata(new_sock, HTTP_200, sizeof(HTTP_404));
+		senddata(new_sock, HTTP_200, strlen(HTTP_200));
         }
-		printf("%d", queue_count);
+		//printf("%d", queue_count);
     }
 
-    
+    x = 0;
+    while(queue_count > 0);
+    queue_count = -1;
+    for(; x < numthreads; x++)
+    {
+		pthread_cond_signal(&work_cond);
+		pthread_join(threadarray[x], NULL);
+    }
     fprintf(stderr, "Server shutting down.\n");
-        
     close(main_socket);
 }
 
