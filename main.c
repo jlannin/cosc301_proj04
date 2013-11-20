@@ -51,8 +51,7 @@ void *worker_function(void *arg) {
 	int fail = 0;
 	int filesize = 0;
 	struct stat checkfile;
-	char * requestedfile;
-	int slash = 0;
+	char requestedfile [1024];
 	char *ipadd;
 	int portnum = 0;
 	char * getip;
@@ -64,29 +63,22 @@ void *worker_function(void *arg) {
 			pthread_cond_wait(&work_cond, &work_mutex);
 		}
 		extractsock = tail->sock;
+		getip = tail->ip;
+		portnum = tail->port;
+		ipadd = (char *) malloc(sizeof(char)*strlen(getip) + 1);
+		int x = 0;
+		for(; x < strlen(getip)+1; x++)
+		{
+			ipadd[x] = getip[x];
+		}
 		if(tail->previous == NULL) //only one item in list
 		{
-			head = NULL;
-			getip = tail->ip;
-			ipadd = (char *) malloc(sizeof(char)*strlen(getip) + 1);
-			int x = 0;
-			for(; x < strlen(getip)+1; x++)
-			{
-				ipadd[x] = getip[x];
-			}	
+			head = NULL;	
 			free(tail);
 			tail = NULL;
 		}
 		else {
 			tail = tail->previous; //set to one before (know exists)
-			portnum = tail->next->port;
-			getip = tail->next->ip;
-			ipadd = (char *) malloc(sizeof(char)*strlen(getip) + 1);
-			int x = 0;
-			for(; x < strlen(getip)+1; x++)
-			{
-				ipadd[x] = getip[x];
-			}		
 			free(tail->next);	
 			tail->next = NULL;
 		}
@@ -95,21 +87,24 @@ void *worker_function(void *arg) {
 
 		getreq = getrequest(extractsock, requestedfile, 1024);
 		if (!getreq) {
-			
+			printf("%s", requestedfile);
 			if (requestedfile[0] == '/')
 			{
-				requestedfile++;
-				slash = 1;
+				getstat = stat(&(requestedfile[1]), &checkfile);
 			}
-			getstat = stat(requestedfile, &checkfile);
+			else {
+				getstat = stat(requestedfile, &checkfile);
+			}
+			printf("%d", getstat);
 			if (!getstat) {			
 				filesize = checkfile.st_size;
 				int datasize = 63 + sizeof(filesize) +  filesize;
 				char data [datasize];
 				sprintf(data, HTTP_200, (int)checkfile.st_size);
-				int fd = open("main.c", O_RDONLY);
+				int fd = open(requestedfile, O_RDONLY);
 				read(fd, data+(63+sizeof(filesize)), checkfile.st_size);
 				data[datasize] = '\0';
+				printf("%s", data);
 				senddata(extractsock, data, datasize);
 				shutdown(extractsock, SHUT_RDWR);
 				close(fd);
@@ -123,6 +118,7 @@ void *worker_function(void *arg) {
 		}
 		if(fail){
 			senddata(extractsock, HTTP_404, sizeof(HTTP_404));
+			shutdown(extractsock, SHUT_RDWR);
 		}	
 		pthread_mutex_lock(&log_mutex);	
 		FILE * log = fopen("weblog.txt", "a");
@@ -132,12 +128,8 @@ void *worker_function(void *arg) {
 		fwrite(portstr, strlen(portstr), 1, log);
 		time_t now = time(NULL);
 		char * time = ctime(&now);
-		fwrite(time, strlen(time), 1, log);
-		fwrite(" \"GET " , 6, 1, log);		
-		if (slash)
-		{
-			requestedfile--;
-		}	
+		fwrite(time, strlen(time)-1, 1, log);
+		fwrite(" \"GET " , 6, 1, log);
 		fwrite(requestedfile, strlen(requestedfile), 1, log);
 		if(fail){
 			fwrite("\" 404 ", 6, 1, log);
@@ -158,9 +150,13 @@ void runserver(int numthreads, unsigned short serverport) {
     //////////////////////////////////////////////////
     // create your pool of threads here
 	//pthread_t p1;
-	//pthread_create(&p1,NULL, worker_function, NULL);
-
-
+	//
+	pthread_t threadarray [numthreads];
+	int x = 0;
+	for(; x < numthreads; x++)
+	{
+		pthread_create(&(threadarray[x]),NULL, worker_function, NULL);
+	}
 
 
     //////////////////////////////////////////////////
@@ -230,6 +226,7 @@ void runserver(int numthreads, unsigned short serverport) {
 		printf("%d", queue_count);
     }
 
+    
     fprintf(stderr, "Server shutting down.\n");
         
     close(main_socket);
