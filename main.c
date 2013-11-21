@@ -1,6 +1,6 @@
 /*
 Justin Lannin and Adam Becker
-11/20/13 at the 11th hour
+11/20/13
 COSC 301
 
 Professor Sommers
@@ -74,6 +74,7 @@ void processandlog(int sock, char * ipadd, int portnum)
 		int fd = 0;
 		int sendfail = 0;
 		int filesize = 0;
+		int sendreturn = 0;
 		char requestedfile [1024] = "";
 		int fail = 0;
 		int getreq = getrequest(sock, requestedfile, 1024);
@@ -90,7 +91,7 @@ void processandlog(int sock, char * ipadd, int portnum)
 				int datasize = 63 + intsize(filesize) + filesize;
 				char data [datasize];
 				sprintf(data, HTTP_200, (int)checkfile.st_size);
-				printf("%s", requestedfile);
+				
 				if (requestedfile[0] == '/')
 				{	
 					fd = open(&(requestedfile[1]), O_RDONLY);
@@ -100,7 +101,8 @@ void processandlog(int sock, char * ipadd, int portnum)
 				}				
 				read(fd, &(data[(63 + intsize(filesize))]), checkfile.st_size);			
 				data[datasize] = '\0';
-				if (senddata(sock, data, datasize)== -1)
+				sendreturn = senddata(sock, data, datasize);
+				if (sendreturn == -1)
 				{
 					printf("%s", "Data sending failed! So sad");
 					sendfail = 1;
@@ -116,7 +118,8 @@ void processandlog(int sock, char * ipadd, int portnum)
 			fail = 1;	//getrequest fails means that we won't ever find the file, return file not found	
 		}
 		if(fail){
-			if (senddata(sock, HTTP_404, strlen(HTTP_404))== -1);
+			sendreturn = senddata(sock, HTTP_404, strlen(HTTP_404));
+			if (sendreturn == -1)
 			{
 					printf("%s", "Data sending failed! So sad");
 					sendfail = 1;
@@ -142,8 +145,8 @@ void processandlog(int sock, char * ipadd, int portnum)
 			else {
 				fwrite("\" 200 ", 6, 1, log);
 			}
-			char buffer[sizeof(filesize)];
-			sprintf(buffer, "%d\n", filesize);
+			char buffer[intsize(sendreturn)];
+			sprintf(buffer, "%d\n", sendreturn);
 			fwrite(buffer, strlen(buffer), 1, log);
 			fclose(log);
 			pthread_mutex_unlock(&log_mutex);
@@ -152,7 +155,7 @@ void processandlog(int sock, char * ipadd, int portnum)
 		{	//since we want to write to log for every request, it makes sense to keep track of senddata failures
 			pthread_mutex_lock(&log_mutex);	
 			FILE * log = fopen("weblog.txt", "a");
-			fwrite("Senddata failed", 15, 1, log);
+			fwrite("Senddata failed\n", 16, 1, log);
 			fclose(log);
 			pthread_mutex_unlock(&log_mutex);
 		}
