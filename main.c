@@ -60,7 +60,7 @@ void *worker_function(void *arg) {
 	int fail = 0;
 	int filesize = 0;
 	struct stat checkfile;
-	char requestedfile [1024];
+	char requestedfile [1024] = "";
 	char *ipadd;
 	int portnum = 0;
 	char * getip;
@@ -154,6 +154,7 @@ void *worker_function(void *arg) {
 		sprintf(buffer, "%d\n", filesize);
 		fwrite(buffer, strlen(buffer), 1, log);
 		fclose(log);
+		free(ipadd);
 		pthread_mutex_unlock(&log_mutex);
 	}
 	return NULL;
@@ -240,12 +241,16 @@ void runserver(int numthreads, unsigned short serverport) {
     }
 
     x = 0;
-    while(queue_count > 0);
+	printf("%s\n", "loop1");
+    while(queue_count > 0){
+		printf("%s\n", "loop");
+	}
     queue_count = -1;
     for(; x < numthreads; x++)
     {
-		pthread_cond_signal(&work_cond);
+		pthread_cond_broadcast(&work_cond);
 		pthread_join(threadarray[x], NULL);
+		printf("%d%s\n", threadarray[x], " joined.");
     }
     fprintf(stderr, "Server shutting down.\n");
     close(main_socket);
