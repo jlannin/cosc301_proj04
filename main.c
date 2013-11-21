@@ -1,3 +1,15 @@
+/*
+Justin Lannin and Adam Becker
+11/20/13 at the 11th hour
+COSC 301
+
+Professor Sommers
+
+We both worked on all aspects of this project.  Work was distributed very fairly.
+
+*/
+
+
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +21,7 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <arpa/inet.h>
+#include <sys/types.h>
 
 #include "network.h"
 
@@ -43,6 +56,7 @@ void usage(const char *progname) {
     exit(0);
 }
 
+//returns number of digits of x
 int intsize (int x) {
 	int count = 1;
 	while (x > 9){
@@ -52,26 +66,115 @@ int intsize (int x) {
 	return count;
 }
 
+//processes data and updates the log
+void processandlog(int sock, char * ipadd, int portnum)
+{
+		struct stat checkfile;
+		int getstat = 0;
+		int fd = 0;
+		int sendfail = 0;
+		int filesize = 0;
+		char requestedfile [1024] = "";
+		int fail = 0;
+		int getreq = getrequest(sock, requestedfile, 1024);
+		if (!getreq) {
+			if (requestedfile[0] == '/')
+			{
+				getstat = stat(&(requestedfile[1]), &checkfile);
+			}
+			else {
+				getstat = stat(requestedfile, &checkfile);
+			}
+			if (!getstat) {			
+				filesize = checkfile.st_size;
+				int datasize = 63 + intsize(filesize) + filesize;
+				char data [datasize];
+				sprintf(data, HTTP_200, (int)checkfile.st_size);
+				printf("%s", requestedfile);
+				if (requestedfile[0] == '/')
+				{	
+					fd = open(&(requestedfile[1]), O_RDONLY);
+				}
+				else {
+					fd = open(requestedfile, O_RDONLY);
+				}				
+				read(fd, &(data[(63 + intsize(filesize))]), checkfile.st_size);			
+				data[datasize] = '\0';
+				if (senddata(sock, data, datasize)== -1)
+				{
+					printf("%s", "Data sending failed! So sad");
+					sendfail = 1;
+				}
+				shutdown(sock, SHUT_RDWR);
+				close(fd);
+			}
+			else {
+				fail = 1;			
+			}
+		}
+		else {
+			fail = 1;	//getrequest fails means that we won't ever find the file, return file not found	
+		}
+		if(fail){
+			if (senddata(sock, HTTP_404, strlen(HTTP_404))== -1);
+			{
+					printf("%s", "Data sending failed! So sad");
+					sendfail = 1;
+			}
+			shutdown(sock, SHUT_RDWR);		
+		}
+		if(!sendfail)
+		{
+			pthread_mutex_lock(&log_mutex);	
+			FILE * log = fopen("weblog.txt", "a");
+			fwrite(ipadd, strlen(ipadd), 1, log);
+			char portstr[intsize(portnum)];
+			sprintf(portstr, ":%d ", portnum);
+			fwrite(portstr, strlen(portstr), 1, log);
+			time_t now = time(NULL);
+			char * time = ctime(&now);
+			fwrite(time, strlen(time)-1, 1, log);
+			fwrite(" \"GET " , 6, 1, log);
+			fwrite(requestedfile, strlen(requestedfile), 1, log);
+			if(fail){
+				fwrite("\" 404 ", 6, 1, log);
+			}		
+			else {
+				fwrite("\" 200 ", 6, 1, log);
+			}
+			char buffer[sizeof(filesize)];
+			sprintf(buffer, "%d\n", filesize);
+			fwrite(buffer, strlen(buffer), 1, log);
+			fclose(log);
+			pthread_mutex_unlock(&log_mutex);
+		}
+		else
+		{	//since we want to write to log for every request, it makes sense to keep track of senddata failures
+			pthread_mutex_lock(&log_mutex);	
+			FILE * log = fopen("weblog.txt", "a");
+			fwrite("Senddata failed", 15, 1, log);
+			fclose(log);
+			pthread_mutex_unlock(&log_mutex);
+		}
+}
+
+//handles worker threads
+//workers get next item off of queue
+//and call process and log
 void *worker_function(void *arg) {
 	printf("%s\n", "Thread created");
 	int extractsock = 0;
-	int getreq = 0;
-	int getstat = 0;
-	int fail = 0;
-	int filesize = 0;
-	struct stat checkfile;
-	char requestedfile [1024] = "";
 	char *ipadd;
 	int portnum = 0;
 	char * getip;
-	while(still_running)
+	while(1)
 	{
 		pthread_mutex_lock(&work_mutex);
 		while(queue_count == 0){
-			//printf("%s\n", "going to sleep");
 			pthread_cond_wait(&work_cond, &work_mutex);
 		}
 		if(queue_count == -1){
+			pthread_mutex_unlock(&work_mutex);
 			break;
 		}
 		extractsock = tail->sock;
@@ -96,66 +199,8 @@ void *worker_function(void *arg) {
 		}
 		queue_count--;
 		pthread_mutex_unlock(&work_mutex);
-
-		getreq = getrequest(extractsock, requestedfile, 1024);
-		if (!getreq) {
-			//printf("%s\n", requestedfile);
-			if (requestedfile[0] == '/')
-			{
-				getstat = stat(&(requestedfile[1]), &checkfile);
-			}
-			else {
-				getstat = stat(requestedfile, &checkfile);
-			}
-			//printf("%d", getstat);
-			if (!getstat) {			
-				filesize = checkfile.st_size;
-				printf("%d\n", intsize(filesize));
-				int datasize = 63 + intsize(filesize) + filesize;
-				char data [datasize];
-				sprintf(data, HTTP_200, (int)checkfile.st_size);
-				int fd = open(requestedfile, O_RDONLY);
-				read(fd, data+(63 + intsize(filesize)), checkfile.st_size);
-				data[datasize] = '\0';
-				//printf("%s", data);
-				senddata(extractsock, data, datasize);
-				shutdown(extractsock, SHUT_RDWR);
-				close(fd);
-			}
-			else {
-				fail = 1;			
-			}
-		}
-		else {
-			fail = 1;		
-		}
-		if(fail){
-			senddata(extractsock, HTTP_404, strlen(HTTP_404));
-			shutdown(extractsock, SHUT_RDWR);
-		}	
-		pthread_mutex_lock(&log_mutex);	
-		FILE * log = fopen("weblog.txt", "a");
-		fwrite(ipadd, strlen(ipadd), 1, log);
-		char portstr[intsize(portnum)];
-		sprintf(portstr, ":%d ", portnum);
-		fwrite(portstr, strlen(portstr), 1, log);
-		time_t now = time(NULL);
-		char * time = ctime(&now);
-		fwrite(time, strlen(time)-1, 1, log);
-		fwrite(" \"GET " , 6, 1, log);
-		fwrite(requestedfile, strlen(requestedfile), 1, log);
-		if(fail){
-			fwrite("\" 404 ", 6, 1, log);
-		}		
-		else {
-			fwrite("\" 200 ", 6, 1, log);
-		}
-		char buffer[sizeof(filesize)];
-		sprintf(buffer, "%d\n", filesize);
-		fwrite(buffer, strlen(buffer), 1, log);
-		fclose(log);
+		processandlog(extractsock, ipadd, portnum);
 		free(ipadd);
-		pthread_mutex_unlock(&log_mutex);
 	}
 	return NULL;
 }
@@ -237,20 +282,17 @@ void runserver(int numthreads, unsigned short serverport) {
 		pthread_mutex_unlock(&work_mutex);
 		senddata(new_sock, HTTP_200, strlen(HTTP_200));
         }
-		//printf("%d", queue_count);
     }
 
+    
+    while(queue_count > 0); //spin wait for threads to finish
+    queue_count = -1; //when signal all threads should break and be free!
+    pthread_cond_broadcast(&work_cond);
     x = 0;
-	printf("%s\n", "loop1");
-    while(queue_count > 0){
-		printf("%s\n", "loop");
-	}
-    queue_count = -1;
     for(; x < numthreads; x++)
     {
-		pthread_cond_broadcast(&work_cond);
-		pthread_join(threadarray[x], NULL);
-		printf("%d%s\n", threadarray[x], " joined.");
+		
+		pthread_join(threadarray[x], NULL);		
     }
     fprintf(stderr, "Server shutting down.\n");
     close(main_socket);
